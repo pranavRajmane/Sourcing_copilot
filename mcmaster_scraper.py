@@ -1,229 +1,161 @@
 """
-McMaster-Carr one-shot scraper.
+McMaster-Carr Demo — raw SSE endpoint, no SDK nonsense.
 
-TinyFish opens mcmaster.com, searches for the query, reads the search results
-page, and extracts the top products.  No retries, no page 2.  One shot.
+Usage:
+    python mcmaster_demo.py
 """
 
 import json
-import logging
+import os
 import re
-from dataclasses import dataclass
-from typing import Optional
+import sys
+import time
 
-from tinyfish import TinyFish
+import requests
+from dotenv import load_dotenv
 
-import config  # noqa: F401 — loads .env
+load_dotenv()
 
-logger = logging.getLogger(__name__)
+API_KEY = os.environ.get("TINYFISH_API_KEY")
+if not API_KEY:
+    print("Set TINYFISH_API_KEY in .env")
+    sys.exit(1)
 
-_client = TinyFish()
-
-
-# ---------------------------------------------------------------------------
-# Data
-# ---------------------------------------------------------------------------
-
-
-@dataclass
-class McmasterPartQuote:
-    name: str
-    price_usd: float
-    part_number: str
-    availability: str
-    url: str
-
-
-# ---------------------------------------------------------------------------
-# TinyFish goal
-# ---------------------------------------------------------------------------
+GOAL = """\
+1. Wait for the page to fully load.
+2. Type "m5 0.8mm screw" in the search bar and press Enter.
+3. Wait for results. You will see a grid of product categories.
+   Click directly on the text "Socket Head Screws".
+4. Wait for subcategories. Click directly on the text "Steel Socket Head Screws".
+5. Wait for the product table to load.
+6. DO NOT click any product. Just READ the table on screen.
+   Look at the "M5 × 0.8 mm" section under "Black-Oxide Alloy Steel".
+   Find the row with the LOWEST price.
+7. Return ONLY JSON:
+{"part_number":"...","price_text":"...","length_mm":"...","threading":"...","package_qty":"...","specs_met":"...","material":"Black-Oxide Alloy Steel","thread_size":"M5 x 0.8 mm"}
+"""
 
 
-def _build_goal(query: str) -> str:
-    return (
-        f'You are on mcmaster.com.  Follow these steps EXACTLY:\n'
-        f'\n'
-        f'1. Type "{query}" into the search bar and press Enter.\n'
-        f'2. Wait for the search results page to load completely.\n'
-        f'3. If the page shows PRODUCT CATEGORIES or subcategories instead of\n'
-        f'   specific parts with prices, click the single most relevant\n'
-        f'   category to reach a page with actual product listings and prices.\n'
-        f'   Only click ONE category — do not drill deeper.\n'
-        f'4. Once you see a page with specific parts that have prices and part\n'
-        f'   numbers, extract up to 5 products.  For each product extract:\n'
-        f'   - product name / description\n'
-        f'   - price (the per-unit or "each" price, e.g. "$4.72")\n'
-        f'   - McMaster part number (e.g. "91251A197")\n'
-        f'   - availability text (e.g. "In Stock", ships date, etc.)\n'
-        f'   - product URL (the link href, or construct it as\n'
-        f'     https://www.mcmaster.com/<part_number>)\n'
-        f'\n'
-        f'RULES:\n'
-        f'- Do NOT click on any individual product detail page.\n'
-        f'- Do NOT go to page 2.\n'
-        f'- Do NOT navigate away from the results after the one allowed\n'
-        f'  category click.\n'
-        f'- Extract ONLY what is visible on screen.\n'
-        f'- Maximum 5 products.\n'
-        f'- If prices show quantity breaks, use the single-unit / "Each" price.\n'
-        f'\n'
-        f'Return ONLY this JSON (no markdown, no explanation):\n'
-        f'{{"results": [\n'
-        f'  {{"name": "...", "price_text": "...", "part_number": "...", '
-        f'"availability": "...", "url": "..."}},\n'
-        f'  ...\n'
-        f']}}\n'
-        f'\n'
-        f'Respond NOW after reading the results page.'
-    )
+def main():
+    print("\n  McMaster-Carr — cheapest M5 0.8mm socket head cap screw")
+    print("  " + "=" * 55)
 
+    t0 = time.perf_counter()
+    result_data = None
 
-# ---------------------------------------------------------------------------
-# TinyFish SDK runner
-# ---------------------------------------------------------------------------
+    with requests.post(
+        "https://agent.tinyfish.ai/v1/automation/run-sse",
+        headers={
+            "X-API-Key": API_KEY,
+            "Content-Type": "application/json",
+        },
+        json={
+            "url": "https://www.mcmaster.com",
+            "goal": GOAL,
+            "browser_profile": "stealth",
+            "proxy_config": {"enabled": True, "country_code": "US"},
+        },
+        stream=True,
+        timeout=300,
+    ) as resp:
+        resp.raise_for_status()
+        for line in resp.iter_lines():
+            if not line:
+                continue
+            text = line.decode("utf-8")
 
+            # SSE lines look like: data: {"type":"PROGRESS",...}
+            if not text.startswith("data:"):
+                continue
+            payload = text[5:].strip()
+            if not payload:
+                continue
 
-def _get_event_type(event) -> str:
-    return type(event).__name__.replace("Event", "").upper()
+            try:
+                event = json.loads(payload)
+            except json.JSONDecodeError:
+                print(f"  [?] {payload[:100]}")
+                continue
 
+            etype = event.get("type", "")
 
-def _extract_json(text: str) -> Optional[dict]:
-    text = re.sub(r"```(?:json)?\s*", "", text).strip().rstrip("`")
+            if etype == "STARTED":
+                print(f"  [STARTED] run_id={event.get('runId', event.get('run_id', '?'))}")
+
+            elif etype == "STREAMING_URL":
+                url = event.get("streamingUrl", event.get("streaming_url", ""))
+                print(f"  [LIVE]    {url}")
+
+            elif etype == "PROGRESS":
+                purpose = event.get("purpose", "")
+                print(f"  [STEP]    {purpose}")
+
+            elif etype == "HEARTBEAT":
+                pass  # ignore
+
+            elif etype == "COMPLETE":
+                status = event.get("status", "?")
+                print(f"  [DONE]    status={status}")
+
+                result_data = event.get("result")
+                if isinstance(result_data, str):
+                    # Try parsing JSON from string
+                    try:
+                        result_data = json.loads(result_data)
+                    except json.JSONDecodeError:
+                        m = re.search(r"\{.*\}", result_data, re.DOTALL)
+                        if m:
+                            try:
+                                result_data = json.loads(m.group())
+                            except json.JSONDecodeError:
+                                pass
+
+                if event.get("error"):
+                    print(f"  [ERROR]   {event['error']}")
+
+            else:
+                print(f"  [{etype}]  {json.dumps(event)[:120]}")
+
+    elapsed = time.perf_counter() - t0
+
+    if not result_data or not isinstance(result_data, dict):
+        print(f"\n  FAILED after {elapsed:.1f}s — no result")
+        print(f"  Raw: {result_data}")
+        sys.exit(1)
+
+    # Parse price
+    price = 0.0
+    pt = str(result_data.get("price_text", ""))
+    pm = re.search(r"[\d.]+", pt.replace(",", ""))
+    if pm:
+        price = float(pm.group())
+
+    pkg = result_data.get("package_qty", "?")
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-    match = re.search(r"\{.*\}", text, re.DOTALL)
-    if match:
-        try:
-            return json.loads(match.group())
-        except json.JSONDecodeError:
-            pass
-    return None
+        per_unit = price / int(str(pkg))
+    except (ValueError, ZeroDivisionError):
+        per_unit = price
+
+    print(f"""
+  ============================================================
+  CHEAPEST M5 x 0.8mm SOCKET HEAD CAP SCREW
+  ============================================================
+  Part Number:  {result_data.get('part_number', '?')}
+  Price:        {result_data.get('price_text', '?')}  (pkg of {pkg})
+  Per-unit:     ${per_unit:.4f}
+  Length:       {result_data.get('length_mm', '?')} mm
+  Threading:    {result_data.get('threading', '?')}
+  Material:     {result_data.get('material', '?')}
+  Thread:       {result_data.get('thread_size', '?')}
+  Specs:        {result_data.get('specs_met', '?')}
+  ============================================================
+  Done in {elapsed:.1f}s
+""")
+
+    with open("mcmaster_result.json", "w") as f:
+        json.dump(result_data, f, indent=2)
+    print("  Saved to mcmaster_result.json\n")
 
 
-def _run_tinyfish(url: str, goal: str) -> Optional[dict]:
-    """Blocking call — run TinyFish, return parsed JSON or None."""
-    try:
-        with _client.agent.stream(url=url, goal=goal) as stream:
-            for event in stream:
-                etype = _get_event_type(event)
-
-                if etype == "PROGRESS":
-                    msg = getattr(event, "message", getattr(event, "description", ""))
-                    if msg:
-                        logger.info("[TinyFish] %s", msg)
-
-                elif "STREAM" in etype:
-                    live = getattr(event, "streaming_url", None) or getattr(event, "url", None)
-                    if live:
-                        logger.info("[TinyFish] Live: %s", live)
-
-                elif etype in ("ERROR", "FAILED"):
-                    err = getattr(event, "error", getattr(event, "message", "unknown"))
-                    logger.error("[TinyFish] ERROR: %s", err)
-                    return None
-
-                elif etype == "COMPLETE":
-                    raw = (
-                        getattr(event, "result_json", None)
-                        or getattr(event, "resultJson", None)
-                        or getattr(event, "result", None)
-                        or getattr(event, "data", None)
-                        or getattr(event, "output", None)
-                        or getattr(event, "text", None)
-                    )
-                    if not raw:
-                        logger.error("[TinyFish] COMPLETE but empty payload")
-                        return None
-                    if isinstance(raw, dict):
-                        return raw
-                    parsed = _extract_json(str(raw))
-                    if parsed:
-                        return parsed
-                    logger.error("[TinyFish] Could not parse: %.300s", str(raw))
-                    return None
-
-    except Exception as exc:
-        logger.error("[TinyFish] %s", exc, exc_info=True)
-        return None
-
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Parsers
-# ---------------------------------------------------------------------------
-
-
-def _parse_price(raw) -> float | None:
-    if raw is None:
-        return None
-    if isinstance(raw, (int, float)):
-        return float(raw)
-    text = str(raw)
-    text = text.replace("$", "").replace(",", "")
-    # Strip per-unit suffixes
-    text = re.sub(r"(?i)\s*/?\s*(each|ea|per\s+unit|per\s+piece)\.?", "", text)
-    text = text.strip()
-    # Range → take low end
-    if "-" in text or "\u2013" in text:
-        text = re.split(r"[-\u2013]", text)[0].strip()
-    # Strip trailing words
-    text = re.sub(r"[a-zA-Z/]+.*$", "", text).strip()
-    try:
-        return float(text)
-    except (ValueError, TypeError):
-        pass
-    match = re.search(r"[\d]+\.?\d*", str(raw))
-    return float(match.group()) if match else None
-
-
-# ---------------------------------------------------------------------------
-# Public API
-# ---------------------------------------------------------------------------
-
-
-def search_mcmaster(query: str) -> list[McmasterPartQuote]:
-    """
-    Search mcmaster.com for the query.  Returns list of McmasterPartQuote.
-    Blocking call (no async needed — single TinyFish session).
-    """
-    logger.info("Searching McMaster-Carr for: %s", query)
-
-    goal = _build_goal(query)
-    data = _run_tinyfish("https://www.mcmaster.com", goal)
-
-    if data is None:
-        logger.error("TinyFish returned nothing.")
-        return []
-
-    raw_results = data.get("results", [])
-    if not raw_results:
-        logger.error("No results in TinyFish response: %s", data)
-        return []
-
-    quotes: list[McmasterPartQuote] = []
-    for item in raw_results:
-        if not isinstance(item, dict):
-            continue
-
-        price = _parse_price(item.get("price_text") or item.get("price"))
-        if price is None:
-            logger.warning("Skipping (no price): %s", item.get("name", "?"))
-            continue
-
-        name = str(item.get("name") or "Unknown")
-        part_number = str(item.get("part_number") or "N/A")
-        availability = str(item.get("availability") or "Unknown")
-        url = str(item.get("url") or f"https://www.mcmaster.com/{part_number}")
-
-        quotes.append(McmasterPartQuote(
-            name=name,
-            price_usd=price,
-            part_number=part_number,
-            availability=availability,
-            url=url,
-        ))
-
-    return quotes
+if __name__ == "__main__":
+    main()
