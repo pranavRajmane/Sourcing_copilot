@@ -1,8 +1,8 @@
 """
-Sourcing Demo — Google search → first link → extract pricing.
+CAD File Sourcing — Google → free CAD site → download STEP file.
 
 Usage:
-    python mcmaster_demo.py
+    python cad_download.py
 """
 
 import json
@@ -22,31 +22,27 @@ if not API_KEY:
     sys.exit(1)
 
 GOAL = """\
-1. You are on google.com. Type "steel socket head cap screw m5 0.8mm india" in the search bar and press Enter.
+1. You are on google.com. Type "M5x25F  socket head cap screw STEP file free download site:grabcad.com OR site:3dcontentcentral.com OR site:traceparts.com" in the search bar and press Enter.
 2. Wait for search results to load.
-3. Click on the FIRST organic search result link (skip any ads).
-4. Wait for that page to fully load.
-5. Extract product information from the page. Look for:
-   - Product name / description
-   - Price (with currency)
-   - Seller / supplier name
-   - Availability / stock status
-   - Material
-   - Specifications (thread size, length, etc.)
-   - Product URL
-   - Any minimum order quantity
+3. Look at the results. Click the FIRST result that is from GrabCAD, 3DContentCentral, or TraceParts.
 
-   If the page shows multiple products or variants, pick the cheapest one.
+   DO NOT click any McMaster-Carr link. DO NOT go to mcmaster.com.
+   SKIP any result from mcmaster.com, amazon.com, or indiamart.com.
 
-   If a cookie banner or popup appears, close it first.
-
-6. Return ONLY this JSON:
-{"product_name":"...","price":"...","currency":"...","supplier":"...","availability":"...","material":"...","thread_size":"...","length":"...","url":"...","min_order_qty":"...","source_website":"..."}
+4. Wait for the page to load. Close any cookie banners or popups.
+5. On the page, find a download button for a STEP (.step or .stp) file.
+   - If the site shows a format dropdown, select "STEP" or "STP".
+   - If there are multiple parts, pick the one closest to M5x25F  socket head cap screw.
+   - If the site requires login to download, DO NOT sign up.
+     Return {"downloaded": false, "reason": "login_required", "source_site": "...", "source_url": "..."}.
+6. Click the download button.
+7. Return ONLY JSON:
+{"downloaded": true, "filename": "...", "format": "STEP", "part_description": "M5 x 0.8mm socket head cap screw", "source_site": "name of website", "source_url": "page URL", "download_url": "direct download URL if visible"}
 """
 
 
 def main():
-    print("\n  Sourcing — M5x25F  socket head cap screw (India)")
+    print("\n  CAD Download — M5x25F  socket head cap screw STEP file")
     print("  " + "=" * 55)
 
     t0 = time.perf_counter()
@@ -59,7 +55,7 @@ def main():
             "Content-Type": "application/json",
         },
         json={
-            "url": "https://duckduckgo.com",
+            "url": "hhttps://duckduckgo.com",
             "goal": GOAL,
         },
         stream=True,
@@ -116,27 +112,37 @@ def main():
         print(f"  Raw: {result_data}")
         sys.exit(1)
 
-    print(f"""
+    downloaded = result_data.get("downloaded", False)
+
+    if downloaded:
+        print(f"""
   ============================================================
-  SOURCING RESULT
+  CAD FILE DOWNLOADED
   ============================================================
-  Product:      {result_data.get('product_name', '?')}
-  Price:        {result_data.get('price', '?')} {result_data.get('currency', '')}
-  Supplier:     {result_data.get('supplier', '?')}
-  Availability: {result_data.get('availability', '?')}
-  Material:     {result_data.get('material', '?')}
-  Thread:       {result_data.get('thread_size', '?')}
-  Length:       {result_data.get('length', '?')}
-  Min Order:    {result_data.get('min_order_qty', '?')}
-  Source:       {result_data.get('source_website', '?')}
-  URL:          {result_data.get('url', '?')}
+  File:         {result_data.get('filename', '?')}
+  Format:       {result_data.get('format', '?')}
+  Part:         {result_data.get('part_description', '?')}
+  Source:       {result_data.get('source_site', '?')}
+  Page URL:     {result_data.get('source_url', '?')}
+  Download URL: {result_data.get('download_url', '?')}
+  ============================================================
+  Done in {elapsed:.1f}s
+""")
+    else:
+        print(f"""
+  ============================================================
+  CAD FILE NOT DOWNLOADED
+  ============================================================
+  Reason:       {result_data.get('reason', '?')}
+  Source:       {result_data.get('source_site', '?')}
+  Page URL:     {result_data.get('source_url', '?')}
   ============================================================
   Done in {elapsed:.1f}s
 """)
 
-    with open("sourcing_result.json", "w") as f:
+    with open("cad_result.json", "w") as f:
         json.dump(result_data, f, indent=2)
-    print("  Saved to sourcing_result.json\n")
+    print("  Saved to cad_result.json\n")
 
 
 if __name__ == "__main__":
