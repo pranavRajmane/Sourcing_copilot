@@ -1,13 +1,13 @@
 {
-  "product_name": "M5 X 8mm Hex (Allen) Socket Head SS 304 Screw (Dia. 5mm, Length 8mm)",
-  "price": "3.80",
+  "product_name": "Socket Head Cap Screws SNSL (SNSL-M5X25)",
+  "price": "862.00",
   "currency": "INR",
-  "supplier": "OnlyScrews",
-  "availability": "In stock",
-  "material": "SS 304 (Stainless Steel)",
-  "thread_size": "M5 x 0.8mm",
-  "length": "8mm",
-  "url": "https://onlyscrews.in/products/hex-allen-socket-head-m5-x-8-screw-pack-of-20",
-  "min_order_qty": "1",
-  "source_website": "onlyscrews.in"
+  "supplier": "NABEYA BI-TECH",
+  "availability": "50 Pack(s)",
+  "material": "Stainless Steel (SUS316L)",
+  "thread_size": "M5",
+  "length": "25 mm",
+  "url": "https://in.misumi-ec.com/vona2/detail/221006451056/?HissuCode=SNSL-M5X25&list=PageDetail",
+  "min_order_qty": "1 Pack (5 pieces/pack)",
+  "source_website": "MISUMI India"
 }

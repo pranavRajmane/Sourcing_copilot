@@ -22,7 +22,7 @@ if not API_KEY:
     sys.exit(1)
 
 GOAL = """\
-1. You are on google.com. Type "steel socket head cap screw m5 0.8mm india" in the search bar and press Enter.
+1. You are on google.com. Type "M5x25F  socket head cap screw (India) " in the search bar and press Enter.
 2. Wait for search results to load.
 3. Click on the FIRST organic search result link (skip any ads).
 4. Wait for that page to fully load.
